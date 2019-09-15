@@ -1,0 +1,58 @@
+extern crate ring_buffer;
+use ring_buffer::RingBuffer;
+
+#[test]
+fn test1() {
+    let mut rb: RingBuffer = RingBuffer::new(16);
+    let buf: [u8; 17] = [1; 17];
+    assert_eq!(rb.write(&buf), 16);
+
+    let buf: [u8; 17] = [2; 17];
+    assert_eq!(rb.write(&buf), 0);
+}
+
+#[test]
+fn test2() {
+    let mut rb = RingBuffer::new(16);
+    let buf: [u8; 8] = [2; 8];
+    rb.write(&buf);
+    assert_eq!(rb.len(), 8);
+
+    let buf: [u8; 9] = [3; 9];
+    rb.write(&buf);
+    assert_eq!(rb.len(), 16);
+}
+
+#[test]
+fn test3() {
+    let mut rb = RingBuffer::new(16);
+    let buf: [u8; 8] = [3; 8];
+    rb.write(&buf);
+    assert_eq!(rb.len(), 8);
+
+    let read_buf = rb.read();
+    assert_eq!(read_buf.len(), 8);
+}
+
+#[test]
+fn test_4() {
+    let mut rb = RingBuffer::new(16);
+    let buf: [u8; 8] = [2; 8];
+    rb.write(&buf);
+    assert_eq!(rb.read(), vec![2; 8]);
+
+    let buf: [u8; 8] = [3; 8];
+    rb.write(&buf);
+    assert_eq!(rb.read(), vec![3; 8]);
+}
+
+#[test]
+fn test_5() {
+    let mut rb = RingBuffer::new(16);
+    let buf: [u8; 9] = [2; 9];
+    assert_eq!(rb.write(&buf), 9);
+
+    let buf: [u8; 9] = [3; 9];
+    assert_eq!(rb.write(&buf), 7);
+    assert_eq!(rb.read(), vec![2,2,2,2,2,2,2,2,2,3,3,3,3,3,3,3]);
+}
