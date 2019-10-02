@@ -3,7 +3,7 @@ use ring_buffer::RingBuffer;
 
 #[test]
 fn test1() {
-    let mut rb: RingBuffer = RingBuffer::new(16);
+    let rb: RingBuffer = RingBuffer::new(16);
     let buf: [u8; 17] = [1; 17];
     assert_eq!(rb.write(&buf), 16);
 
@@ -13,7 +13,7 @@ fn test1() {
 
 #[test]
 fn test2() {
-    let mut rb = RingBuffer::new(16);
+    let rb = RingBuffer::new(16);
     let buf: [u8; 8] = [2; 8];
     rb.write(&buf);
     assert_eq!(rb.len(), 8);
@@ -25,7 +25,7 @@ fn test2() {
 
 #[test]
 fn test3() {
-    let mut rb = RingBuffer::new(16);
+    let rb = RingBuffer::new(16);
     let buf: [u8; 8] = [3; 8];
     rb.write(&buf);
     assert_eq!(rb.len(), 8);
@@ -36,7 +36,7 @@ fn test3() {
 
 #[test]
 fn test_4() {
-    let mut rb = RingBuffer::new(16);
+    let rb = RingBuffer::new(16);
     let buf: [u8; 8] = [2; 8];
     rb.write(&buf);
     assert_eq!(rb.read_all(), vec![2; 8]);
@@ -48,7 +48,7 @@ fn test_4() {
 
 #[test]
 fn test_5() {
-    let mut rb = RingBuffer::new(16);
+    let rb = RingBuffer::new(16);
     let buf: [u8; 9] = [2; 9];
     assert_eq!(rb.write(&buf), 9);
 

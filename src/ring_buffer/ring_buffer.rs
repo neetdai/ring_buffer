@@ -1,6 +1,8 @@
+use std::cell::UnsafeCell;
 use std::cmp::min;
 use std::fmt::{Debug, Error as FmtError, Formatter};
 use std::ops::Fn;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::usize::MAX;
 
 pub enum Error {
@@ -16,55 +18,65 @@ impl Debug for Error {
 }
 
 pub struct RingBuffer {
-    inner: Vec<u8>,
-    write_position: usize,
-    read_position: usize,
+    inner: *mut u8,
+    size: usize,
+    lock: AtomicBool,
+    write_position: AtomicUsize,
+    read_position: AtomicUsize,
     callback: Option<Box<dyn Fn(Vec<u8>) + 'static>>,
 }
 
 impl RingBuffer {
     pub fn new(size: usize) -> Self {
         RingBuffer {
-            inner: vec![0; size],
-            write_position: 0,
-            read_position: 0,
+            inner: {
+                let mut buffer: Vec<u8> = vec![0; size];
+                buffer.as_mut_ptr()
+            },
+            size: size,
+            lock: AtomicBool::new(false),
+            write_position: AtomicUsize::new(0),
+            read_position: AtomicUsize::new(0),
             callback: None,
         }
     }
 
     #[inline]
     fn read_position_and_write_position(&self) -> (usize, usize) {
-        (self.read_position, self.write_position)
+        (
+            self.read_position.load(Ordering::Acquire),
+            self.write_position.load(Ordering::Acquire),
+        )
     }
 
     fn is_full(&self) -> bool {
         let (read_position, write_position): (usize, usize) =
             self.read_position_and_write_position();
 
-        write_position >= self.inner.len() && write_position - self.inner.len() >= read_position
+        write_position >= self.size && write_position - self.size >= read_position
     }
 
     fn is_empty(&self) -> bool {
         let (read_position, write_position): (usize, usize) =
             self.read_position_and_write_position();
-        let len: usize = self.inner.len();
+        let len: usize = self.size;
 
         (write_position % len) == (read_position % len)
     }
 
     fn avaliable_write_len(&self) -> usize {
-        let read_position: usize = self.read_position;
-        let write_position: usize = self.write_position;
+        let (read_position, write_position): (usize, usize) =
+            self.read_position_and_write_position();
 
-        if self.inner.is_empty() {
+        if self.size == 0 {
             return 0;
         }
 
-        if self.inner.len() < read_position {
+        if self.size < read_position {
             return 0;
         }
 
-        let len: usize = self.inner.len();
+        let len: usize = self.size;
         if write_position >= read_position {
             len - (write_position % len) + (read_position % len)
         } else {
@@ -76,7 +88,7 @@ impl RingBuffer {
         let (read_position, write_position): (usize, usize) =
             self.read_position_and_write_position();
 
-        let len: usize = self.inner.len();
+        let len: usize = self.size;
         if (write_position % len) >= (read_position % len) {
             write_position - read_position
         } else {
@@ -88,38 +100,58 @@ impl RingBuffer {
         self.avaliable_read_len()
     }
 
-    pub fn write(&mut self, buf: &[u8]) -> usize {
-        if self.is_full() {
-            return 0;
+    pub fn write(&self, buf: &[u8]) -> usize {
+        loop {
+            if self.lock.compare_and_swap(false, true, Ordering::AcqRel) == false {
+                if self.is_full() {
+                    self.lock.store(false, Ordering::Release);
+                    return 0;
+                }
+
+                let avaliable_write_len: usize = min(self.avaliable_write_len(), buf.len());
+                let write_position: usize = self.write_position.load(Ordering::Acquire);
+                let inner_len: usize = self.size;
+
+                buf[0..avaliable_write_len]
+                    .iter()
+                    .enumerate()
+                    .for_each(|(index, item)| {
+                        let tmp: *mut u8 =
+                            unsafe { self.inner.add((index + write_position) % inner_len) };
+                        unsafe {
+                            tmp.write(*item);
+                        };
+                        self.write_position.store(
+                            (self.write_position.load(Ordering::Acquire) + 1) % MAX,
+                            Ordering::Release,
+                        );
+                    });
+
+                self.lock.store(false, Ordering::Release);
+                return avaliable_write_len;
+            }
         }
-
-        let avaliable_write_len: usize = min(self.avaliable_write_len(), buf.len());
-        let write_position: usize = self.write_position;
-        let inner_len: usize = self.inner.len();
-
-        buf[0..avaliable_write_len]
-            .iter()
-            .enumerate()
-            .for_each(|(index, item)| {
-                self.inner[(index + write_position) % inner_len] = *item;
-                self.write_position = (self.write_position + 1) % MAX;
-            });
-
-        avaliable_write_len
     }
 
-    pub fn read_all(&mut self) -> Vec<u8> {
-        let avaliable_read_len: usize = self.avaliable_read_len();
-        let read_position: usize = self.read_position;
-        let mut result: Vec<u8> = Vec::with_capacity(avaliable_read_len);
-        let inner_len: usize = self.inner.len();
+    pub fn read_all(&self) -> Vec<u8> {
+        loop {
+            if self.lock.compare_and_swap(false, true, Ordering::AcqRel) == false {
+                let avaliable_read_len: usize = self.avaliable_read_len();
+                let read_position: usize = self.read_position.load(Ordering::Acquire);
+                let mut result: Vec<u8> = Vec::with_capacity(avaliable_read_len);
+                let inner_len: usize = self.size;
 
-        (read_position..(read_position + avaliable_read_len)).for_each(|index| {
-            result.push(self.inner[(index) % inner_len]);
-            self.read_position = (self.read_position + 1) % MAX;
-        });
+                (read_position..(read_position + avaliable_read_len)).for_each(|index| {
+                    result.push(unsafe { self.inner.add((index) % inner_len) as u8 });
+                    self.read_position.store(
+                        (self.read_position.load(Ordering::Acquire) + 1) % MAX,
+                        Ordering::Release,
+                    );
+                });
 
-        result
+                return result;
+            }
+        }
     }
 
     pub fn set_callback<T>(&mut self, fnc: T)
@@ -156,10 +188,12 @@ impl RingBuffer {
 
 impl Debug for RingBuffer {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
+
         f.debug_struct("RingBuffer")
             .field("inner", &self.inner)
-            .field("write_position", &self.write_position)
-            .field("read_position", &self.read_position)
+            .field("write_position", &self.write_position.load(Ordering::Acquire))
+            .field("read_position", &self.read_position.load(Ordering::Acquire))
+            .field("size", &self.size)
             .finish()
     }
 }
