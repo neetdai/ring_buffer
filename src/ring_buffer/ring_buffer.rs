@@ -21,6 +21,18 @@ impl Debug for Error {
 
 struct Inner(*mut u8);
 
+impl Inner {
+    fn write(&self, offset: isize, value: u8) {
+        unsafe {
+            self.0.offset(offset).write(value);
+        }
+    }
+
+    fn read(&self, offset: isize) -> u8 {
+        unsafe { self.0.offset(offset).read() }
+    }
+}
+
 unsafe impl Sync for Inner {}
 
 pub struct RingBuffer {
@@ -124,12 +136,8 @@ impl RingBuffer {
                     .iter()
                     .enumerate()
                     .for_each(|(index, item)| {
-                        unsafe {
-                            self.inner
-                                .0
-                                .offset(((index + write_position) % inner_len) as isize)
-                                .write(*item);
-                        }
+                        self.inner
+                            .write(((index + write_position) % inner_len) as isize, *item);
                         self.write_position.store(
                             (self.write_position.load(Ordering::Acquire) + 1) % MAX,
                             Ordering::Release,
@@ -151,11 +159,7 @@ impl RingBuffer {
                 let inner_len: usize = self.size;
 
                 (read_position..(read_position + avaliable_read_len)).for_each(|index| {
-                    result.push(unsafe {
-                        // let tmp: *mut u8 = self.inner.add((index) % inner_len) as *mut u8;
-                        // *tmp
-                        self.inner.0.offset(((index) % inner_len) as isize).read()
-                    });
+                    result.push(self.inner.read(((index) % inner_len) as isize));
                     self.read_position.store(
                         (self.read_position.load(Ordering::Acquire) + 1) % MAX,
                         Ordering::Release,

@@ -116,14 +116,12 @@ fn test_8() {
         assert_eq!(tmp1.write(&buffer), 9);
     });
 
-    let j2 = spawn(move || {
-        loop {
-            let result = tmp2.read_all();
-            if result.len() > 0 {
-                assert_eq!(result.len(), 9);
-                assert_eq!(result, vec![1; 9]);
-                break;
-            }
+    let j2 = spawn(move || loop {
+        let result = tmp2.read_all();
+        if result.len() > 0 {
+            assert_eq!(result.len(), 9);
+            assert_eq!(result, vec![1; 9]);
+            break;
         }
     });
 
@@ -134,10 +132,10 @@ fn test_8() {
 #[test]
 fn test_9() {
     use std::sync::Arc;
-    use std::thread::{spawn, sleep_ms};
+    use std::thread::{sleep_ms, spawn};
 
     let rb = Arc::new(RingBuffer::new(16));
-    
+
     let tmp1 = rb.clone();
     let tmp2 = rb.clone();
     let tmp3 = rb.clone();
@@ -152,7 +150,11 @@ fn test_9() {
 
     let j3 = spawn(move || {
         let result = tmp3.read_all();
-        assert!(result == vec![1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,2] || result == vec![2,2,2,2,2,2,2,1,1,1,1,1,1,1,1,1] || result.is_empty());
+        assert!(
+            result == vec![1, 1, 1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2, 2]
+                || result == vec![2, 2, 2, 2, 2, 2, 2, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+                || result.is_empty()
+        );
     });
 
     j1.join();
